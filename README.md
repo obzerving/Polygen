@@ -9,7 +9,7 @@ Copy polygen.inx and polygen.py into your Inkscape user extensions directory. Wh
 
 Usage:
 
-See the file [How_to_use_Polygen.pdf](https://github.com/obzerving/Collarz/blob/main/How_to_use_Polygen.pdf) for details.
+See the file [How_to_use_Polygen.pdf](https://github.com/obzerving/Polygen/blob/main/How_to_use_Polygen.pdf) for details.
 
 Note:
 
