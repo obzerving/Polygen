@@ -582,8 +582,6 @@ class Polygen(inkex.EffectExtension):
             # Guessed wrong. For now, we're just going to abort
             # TODO: Support revolving around the X axis
             raise inkex.AbortExtension("ERROR: This extension can only revolve about the Y axis")
-        # Check to see if outline intersects radius at any point
-        if yorient:
         '''
         The model will be open at the top and the bottom, so we have to calculate
         the size of the polygons that will cover them. We were given the number
