@@ -7,7 +7,7 @@
         <param name ="polysides" type="int" min="3" max="360" gui-text="Number of Polygon Sides:">6</param>
         <param name ="tabangle" type="float" min="0.0" max="90.0" gui-text="Angle of tab edges (degrees):">45.0</param>
         <param name="tabheight" type="float" min="0.01" max="9999.0" gui-text="Height of tab:">0.4</param>
-        <param name="dashlength" type="float" min="0.0" max="9999.0" gui-text="Length of dashline(zero for solid line):">0.1</param>
+        <param name="dashlength" type="float" precision="3" min="0.0" max="9999.0" gui-text="Length of dashline(zero for solid line):">0.1</param>
         <param name="unit" type="optiongroup" appearance="combo" gui-text="Dimensional units of above parameters and the selected paths:">
             <option translatable="no" value="px">px</option>
             <option translatable="no" value="pt">pt</option>
