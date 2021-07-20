@@ -26,15 +26,18 @@ model; and (3) wrappers to cover each side of the generated model.
 """
 
 import inkex
-from lxml import etree
 import math
 import copy
 import inspect
 
+from inkex import PathElement, Style
+from inkex.paths import Move, Line, ZoneClose, Path
+from inkex.elements._groups import Group
+
 class pathStruct(object):
     def __init__(self):
         self.id="path0000"
-        self.path=[]
+        self.path=Path()
         self.enclosed=False
         self.style = None
     def __str__(self):
@@ -84,48 +87,52 @@ class Polygen(inkex.EffectExtension):
 
     #draw SVG line segment(s) between the given (raw) points
     def drawline(self, dstr, name, parent, sstr=None):
-        line_style   = {'stroke':'#000000','stroke-width':'1','fill':'none'}
+        line_style   = {'stroke':'#000000','stroke-width':'0.25','fill':'#eeeeee'}
         if sstr == None:
-            stylestr = str(inkex.Style(line_style))
+            stylestr = str(Style(line_style))
         else:
             stylestr = sstr
-        el = parent.add(inkex.PathElement())
+        el = parent.add(PathElement())
         el.path = dstr
-        el.style = sstr
+        el.style = stylestr
         el.label = name
 
     def makepoly(self, toplength, numpoly):
       r = toplength/(2*math.sin(math.pi/numpoly))
-      pstr = ''
+      pstr = Path()
       for ppoint in range(0,numpoly):
          xn = r*math.cos(2*math.pi*ppoint/numpoly)
          yn = r*math.sin(2*math.pi*ppoint/numpoly)
          if ppoint == 0:
-            pstr = 'M '
+            pstr.append(Move(xn,yn))
          else:
-            pstr += ' L '
-         pstr += str(xn) + ',' + str(yn)
-      pstr = pstr + ' Z'
+            pstr.append(Line(xn,yn))
+      pstr.append(ZoneClose())
       return pstr
 
     def insidePath(self, path, p):
         point = pnPoint((p.x, p.y))
         pverts = []
         for pnum in path:
-            pverts.append((pnum.x, pnum.y))
+            if pnum.letter == 'Z':
+                pverts.append((path[0].x, path[0].y))
+            else:
+                pverts.append((pnum.x, pnum.y))
         isInside = point.InPolygon(pverts, True)
         return isInside # True if point p is inside path
 
     def makescore(self, pt1, pt2, dashlength):
         # Draws a dashed line of dashlength between two points
-        # Dash = dashlength (in inches) space followed by dashlength mark
+        # Dash = dashlength space followed by dashlength mark
         # if dashlength is zero, we want a solid line
-        apt1 = inkex.paths.Line(0.0,0.0)
-        apt2 = inkex.paths.Line(0.0,0.0)
-        ddash = ''
+        # Returns dashed line as a Path object
+        apt1 = Line(0.0,0.0)
+        apt2 = Line(0.0,0.0)
+        ddash = Path()
         if math.isclose(dashlength, 0.0):
             #inkex.utils.debug("Draw solid dashline")
-            ddash = ' M '+str(pt1.x)+','+str(pt1.y)+' L '+str(pt2.x)+','+str(pt2.y)
+            ddash.append(Move(pt1.x,pt1.y))
+            ddash.append(Line(pt2.x,pt2.y))
         else:
             if math.isclose(pt1.y, pt2.y):
                 #inkex.utils.debug("Draw horizontal dashline")
@@ -137,14 +144,13 @@ class Polygen(inkex.EffectExtension):
                     xcushion = pt1.x - dashlength
                     xpt = pt2.x
                     ypt = pt2.y
-                ddash = ''
                 done = False
                 while not(done):
                     if (xpt + dashlength*2) <= xcushion:
                         xpt = xpt + dashlength
-                        ddash = ddash + ' M ' + str(xpt) + ',' + str(ypt)
+                        ddash.append(Move(xpt,ypt))
                         xpt = xpt + dashlength
-                        ddash = ddash + ' L ' + str(xpt) + ',' + str(ypt)
+                        ddash.append(Line(xpt,ypt))
                     else:
                         done = True
             elif math.isclose(pt1.x, pt2.x):
@@ -157,14 +163,13 @@ class Polygen(inkex.EffectExtension):
                     ycushion = pt1.y - dashlength
                     xpt = pt2.x
                     ypt = pt2.y
-                ddash = ''
                 done = False
                 while not(done):
                     if(ypt + dashlength*2) <= ycushion:
                         ypt = ypt + dashlength         
-                        ddash = ddash + ' M ' + str(xpt) + ',' + str(ypt)
+                        ddash.append(Move(xpt,ypt))
                         ypt = ypt + dashlength
-                        ddash = ddash + ' L ' + str(xpt) + ',' + str(ypt)
+                        ddash.append(Line(xpt,ypt))
                     else:
                         done = True
             else:
@@ -184,7 +189,6 @@ class Polygen(inkex.EffectExtension):
                 msign = (m>0) - (m<0)
                 ycushion = apt2.y + dashlength*math.sin(theta)
                 xcushion = apt2.x + msign*dashlength*math.cos(theta)
-                ddash = ''
                 xpt = apt1.x
                 ypt = apt1.y
                 done = False
@@ -195,11 +199,11 @@ class Polygen(inkex.EffectExtension):
                         # move to end of space / beginning of mark
                         xpt = xpt - msign*dashlength*math.cos(theta)
                         ypt = ypt - msign*dashlength*math.sin(theta)
-                        ddash = ddash + ' M ' + str(xpt) + ',' + str(ypt)
+                        ddash.append(Move(xpt,ypt))
                         # draw the mark
                         xpt = xpt - msign*dashlength*math.cos(theta)
                         ypt = ypt - msign*dashlength*math.sin(theta)
-                        ddash = ddash + ' L ' + str(xpt) + ',' + str(ypt)
+                        ddash.append(Line(xpt,ypt))
                     else:
                         done = True
         return ddash
@@ -220,9 +224,9 @@ class Polygen(inkex.EffectExtension):
         # pt1, pt2 - the two points where the tab will be inserted
         # tabht - the height of the tab
         # taba - the angle of the tab sides
-        # returns the two tab points in order of closest to pt1
-        tpt1 = inkex.paths.Line(0.0,0.0)
-        tpt2 = inkex.paths.Line(0.0,0.0)
+        # returns the two tab points (Line objects) in order of closest to pt1
+        tpt1 = Line(0.0,0.0)
+        tpt2 = Line(0.0,0.0)
         currTabHt = tabht
         currTabAngle = taba
         testAngle = 1.0
@@ -238,8 +242,8 @@ class Polygen(inkex.EffectExtension):
                     tpt2.x = pt2.x + testHt
                     tpt1.y = pt1.y + testHt/math.tan(math.radians(testAngle))
                     tpt2.y = pt2.y - testHt/math.tan(math.radians(testAngle))
-                    pnpt1 = inkex.paths.Move(tpt1.x, tpt1.y)
-                    pnpt2 = inkex.paths.Move(tpt2.x, tpt2.y)
+                    pnpt1 = Move(tpt1.x, tpt1.y)
+                    pnpt2 = Move(tpt2.x, tpt2.y)
                     if ((not tpath.enclosed) and (self.insidePath(tpath.path, pnpt1) or self.insidePath(tpath.path, pnpt2))) or \
                        (tpath.enclosed and ((not self.insidePath(tpath.path, pnpt1)) and (not self.insidePath(tpath.path, pnpt2)))):
                         tpt1.x = pt1.x - currTabHt
@@ -254,8 +258,8 @@ class Polygen(inkex.EffectExtension):
                     tpt2.x = pt2.x + testHt
                     tpt1.y = pt1.y - testHt/math.tan(math.radians(testAngle))
                     tpt2.y = pt2.y + testHt/math.tan(math.radians(testAngle))
-                    pnpt1 = inkex.paths.Move(tpt1.x, tpt1.y)
-                    pnpt2 = inkex.paths.Move(tpt2.x, tpt2.y)
+                    pnpt1 = Move(tpt1.x, tpt1.y)
+                    pnpt2 = Move(tpt2.x, tpt2.y)
                     if ((not tpath.enclosed) and (self.insidePath(tpath.path, pnpt1) or self.insidePath(tpath.path, pnpt2))) or \
                        (tpath.enclosed and ((not self.insidePath(tpath.path, pnpt1)) and (not self.insidePath(tpath.path, pnpt2)))):
                         tpt1.x = pt1.x - currTabHt
@@ -272,8 +276,8 @@ class Polygen(inkex.EffectExtension):
                     tpt2.y = pt2.y - testHt
                     tpt1.x = pt1.x + testHt/math.tan(math.radians(testAngle))
                     tpt2.x = pt2.x - testHt/math.tan(math.radians(testAngle))
-                    pnpt1 = inkex.paths.Move(tpt1.x, tpt1.y)
-                    pnpt2 = inkex.paths.Move(tpt2.x, tpt2.y)
+                    pnpt1 = Move(tpt1.x, tpt1.y)
+                    pnpt2 = Move(tpt2.x, tpt2.y)
                     if ((not tpath.enclosed) and (self.insidePath(tpath.path, pnpt1) or self.insidePath(tpath.path, pnpt2))) or \
                        (tpath.enclosed and ((not self.insidePath(tpath.path, pnpt1)) and (not self.insidePath(tpath.path, pnpt2)))):
                         tpt1.y = pt1.y + currTabHt
@@ -288,8 +292,8 @@ class Polygen(inkex.EffectExtension):
                     tpt2.y = pt2.y - testHt
                     tpt1.x = pt1.x - testHt/math.tan(math.radians(testAngle))
                     tpt2.x = pt2.x + testHt/math.tan(math.radians(testAngle))
-                    pnpt1 = inkex.paths.Move(tpt1.x, tpt1.y)
-                    pnpt2 = inkex.paths.Move(tpt2.x, tpt2.y)
+                    pnpt1 = Move(tpt1.x, tpt1.y)
+                    pnpt2 = Move(tpt2.x, tpt2.y)
                     if ((not tpath.enclosed) and (self.insidePath(tpath.path, pnpt1) or self.insidePath(tpath.path, pnpt2))) or \
                        (tpath.enclosed and ((not self.insidePath(tpath.path, pnpt1)) and (not self.insidePath(tpath.path, pnpt2)))):
                         tpt1.y = pt1.y + currTabHt
@@ -315,20 +319,16 @@ class Polygen(inkex.EffectExtension):
                         tpt2.y = pt2.y - testHt
                         tpt1.x = pt1.x + testHt/math.tan(math.radians(testAngle))
                         tpt2.x = pt2.x - testHt/math.tan(math.radians(testAngle))
-                        tl1 = [('M', [pt1.x,pt1.y])]
-                        tl1 += [('L', [tpt1.x, tpt1.y])]
-                        ele1 = inkex.Path(tl1)
-                        tl2 = [('M', [pt1.x,pt1.y])]
-                        tl2 += [('L', [tpt2.x, tpt2.y])]
-                        ele2 = inkex.Path(tl2)
-                        thetal1 = ele1.rotate(theta, [pt1.x,pt1.y])
-                        thetal2 = ele2.rotate(theta, [pt2.x,pt2.y])
+                        t11 = Path([Move(pt1.x,pt1.y),Line(tpt1.x, tpt1.y)])
+                        t12 = Path([Move(pt1.x,pt1.y),Line(tpt2.x, tpt2.y)])
+                        thetal1 = t11.rotate(theta, [pt1.x,pt1.y])
+                        thetal2 = t12.rotate(theta, [pt2.x,pt2.y])
                         tpt1.x = thetal1[1].x
                         tpt1.y = thetal1[1].y
                         tpt2.x = thetal2[1].x
                         tpt2.y = thetal2[1].y
-                        pnpt1 = inkex.paths.Move(tpt1.x, tpt1.y)
-                        pnpt2 = inkex.paths.Move(tpt2.x, tpt2.y)
+                        pnpt1 = Move(tpt1.x, tpt1.y)
+                        pnpt2 = Move(tpt2.x, tpt2.y)
                         if ((not tpath.enclosed) and (self.insidePath(tpath.path, pnpt1) or self.insidePath(tpath.path, pnpt2))) or \
                            (tpath.enclosed and ((not self.insidePath(tpath.path, pnpt1)) and (not self.insidePath(tpath.path, pnpt2)))):
                             tpt1.y = pt1.y + currTabHt
@@ -338,14 +338,10 @@ class Polygen(inkex.EffectExtension):
                             tpt2.y = pt2.y - currTabHt
                         tpt1.x = pt1.x + currTabHt/math.tan(math.radians(currTabAngle))
                         tpt2.x = pt2.x - currTabHt/math.tan(math.radians(currTabAngle))
-                        tl1 = [('M', [pt1.x,pt1.y])]
-                        tl1 += [('L', [tpt1.x, tpt1.y])]
-                        ele1 = inkex.Path(tl1)
-                        tl2 = [('M', [pt1.x,pt1.y])]
-                        tl2 += [('L', [tpt2.x, tpt2.y])]
-                        ele2 = inkex.Path(tl2)
-                        thetal1 = ele1.rotate(theta, [pt1.x,pt1.y])
-                        thetal2 = ele2.rotate(theta, [pt2.x,pt2.y])
+                        t11 = Path([Move(pt1.x,pt1.y),Line(tpt1.x, tpt1.y)])
+                        t12 = Path([Move(pt1.x,pt1.y),Line(tpt2.x, tpt2.y)])
+                        thetal1 = t11.rotate(theta, [pt1.x,pt1.y])
+                        thetal2 = t12.rotate(theta, [pt2.x,pt2.y])
                         tpt1.x = thetal1[1].x
                         tpt1.y = thetal1[1].y
                         tpt2.x = thetal2[1].x
@@ -355,20 +351,16 @@ class Polygen(inkex.EffectExtension):
                         tpt2.y = pt2.y - testHt
                         tpt1.x = pt1.x - testHt/math.tan(math.radians(testAngle))
                         tpt2.x = pt2.x + testHt/math.tan(math.radians(testAngle))
-                        tl1 = [('M', [pt1.x,pt1.y])]
-                        tl1 += [('L', [tpt1.x, tpt1.y])]
-                        ele1 = inkex.Path(tl1)
-                        tl2 = [('M', [pt1.x,pt1.y])]
-                        tl2 += [('L', [tpt2.x, tpt2.y])]
-                        ele2 = inkex.Path(tl2)
-                        thetal1 = ele1.rotate(theta, [pt1.x,pt1.y])
-                        thetal2 = ele2.rotate(theta, [pt2.x,pt2.y])
+                        t11 = Path([Move(pt1.x,pt1.y),Line(tpt1.x, tpt1.y)])
+                        t12 = Path([Move(pt1.x,pt1.y),Line(tpt2.x, tpt2.y)])
+                        thetal1 = t11.rotate(theta, [pt1.x,pt1.y])
+                        thetal2 = t12.rotate(theta, [pt2.x,pt2.y])
                         tpt1.x = thetal1[1].x
                         tpt1.y = thetal1[1].y
                         tpt2.x = thetal2[1].x
                         tpt2.y = thetal2[1].y
-                        pnpt1 = inkex.paths.Move(tpt1.x, tpt1.y)
-                        pnpt2 = inkex.paths.Move(tpt2.x, tpt2.y)
+                        pnpt1 = Move(tpt1.x, tpt1.y)
+                        pnpt2 = Move(tpt2.x, tpt2.y)
                         if ((not tpath.enclosed) and (self.insidePath(tpath.path, pnpt1) or self.insidePath(tpath.path, pnpt2))) or \
                            (tpath.enclosed and ((not self.insidePath(tpath.path, pnpt1)) and (not self.insidePath(tpath.path, pnpt2)))):
                             tpt1.y = pt1.y + currTabHt
@@ -378,14 +370,10 @@ class Polygen(inkex.EffectExtension):
                             tpt2.y = pt2.y - currTabHt
                         tpt1.x = pt1.x - currTabHt/math.tan(math.radians(currTabAngle))
                         tpt2.x = pt2.x + currTabHt/math.tan(math.radians(currTabAngle))
-                        tl1 = [('M', [pt1.x,pt1.y])]
-                        tl1 += [('L', [tpt1.x, tpt1.y])]
-                        ele1 = inkex.Path(tl1)
-                        tl2 = [('M', [pt1.x,pt1.y])]
-                        tl2 += [('L', [tpt2.x, tpt2.y])]
-                        ele2 = inkex.Path(tl2)
-                        thetal1 = ele1.rotate(theta, [pt1.x,pt1.y])
-                        thetal2 = ele2.rotate(theta, [pt2.x,pt2.y])
+                        t11 = Path([Move(pt1.x,pt1.y),Line(tpt1.x, tpt1.y)])
+                        t12 = Path([Move(pt1.x,pt1.y),Line(tpt2.x, tpt2.y)])
+                        thetal1 = t11.rotate(theta, [pt1.x,pt1.y])
+                        thetal2 = t12.rotate(theta, [pt2.x,pt2.y])
                         tpt1.x = thetal1[1].x
                         tpt1.y = thetal1[1].y
                         tpt2.x = thetal2[1].x
@@ -396,20 +384,16 @@ class Polygen(inkex.EffectExtension):
                         tpt2.y = pt2.y - testHt
                         tpt1.x = pt1.x + testHt/math.tan(math.radians(testAngle))
                         tpt2.x = pt2.x - testHt/math.tan(math.radians(testAngle))
-                        tl1 = [('M', [pt1.x,pt1.y])]
-                        tl1 += [('L', [tpt1.x, tpt1.y])]
-                        ele1 = inkex.Path(tl1)
-                        tl2 = [('M', [pt1.x,pt1.y])]
-                        tl2 += [('L', [tpt2.x, tpt2.y])]
-                        ele2 = inkex.Path(tl2)
-                        thetal1 = ele1.rotate(theta, [pt1.x,pt1.y])
-                        thetal2 = ele2.rotate(theta, [pt2.x,pt2.y])
+                        t11 = Path([Move(pt1.x,pt1.y),Line(tpt1.x, tpt1.y)])
+                        t12 = Path([Move(pt1.x,pt1.y),Line(tpt2.x, tpt2.y)])
+                        thetal1 = t11.rotate(theta, [pt1.x,pt1.y])
+                        thetal2 = t12.rotate(theta, [pt2.x,pt2.y])
                         tpt1.x = thetal1[1].x
                         tpt1.y = thetal1[1].y
                         tpt2.x = thetal2[1].x
                         tpt2.y = thetal2[1].y
-                        pnpt1 = inkex.paths.Move(tpt1.x, tpt1.y)
-                        pnpt2 = inkex.paths.Move(tpt2.x, tpt2.y)
+                        pnpt1 = Move(tpt1.x, tpt1.y)
+                        pnpt2 = Move(tpt2.x, tpt2.y)
                         if ((not tpath.enclosed) and (self.insidePath(tpath.path, pnpt1) or self.insidePath(tpath.path, pnpt2))) or \
                            (tpath.enclosed and ((not self.insidePath(tpath.path, pnpt1)) and (not self.insidePath(tpath.path, pnpt2)))):
                             tpt1.y = pt1.y + currTabHt
@@ -419,14 +403,10 @@ class Polygen(inkex.EffectExtension):
                             tpt2.y = pt2.y - currTabHt
                         tpt1.x = pt1.x + currTabHt/math.tan(math.radians(currTabAngle))
                         tpt2.x = pt2.x - currTabHt/math.tan(math.radians(currTabAngle))
-                        tl1 = [('M', [pt1.x,pt1.y])]
-                        tl1 += [('L', [tpt1.x, tpt1.y])]
-                        ele1 = inkex.Path(tl1)
-                        tl2 = [('M', [pt1.x,pt1.y])]
-                        tl2 += [('L', [tpt2.x, tpt2.y])]
-                        ele2 = inkex.Path(tl2)
-                        thetal1 = ele1.rotate(theta, [pt1.x,pt1.y])
-                        thetal2 = ele2.rotate(theta, [pt2.x,pt2.y])
+                        t11 = Path([Move(pt1.x,pt1.y),Line(tpt1.x, tpt1.y)])
+                        t12 = Path([Move(pt1.x,pt1.y),Line(tpt2.x, tpt2.y)])
+                        thetal1 = t11.rotate(theta, [pt1.x,pt1.y])
+                        thetal2 = t12.rotate(theta, [pt2.x,pt2.y])
                         tpt1.x = thetal1[1].x
                         tpt1.y = thetal1[1].y
                         tpt2.x = thetal2[1].x
@@ -436,20 +416,16 @@ class Polygen(inkex.EffectExtension):
                         tpt2.y = pt2.y - testHt
                         tpt1.x = pt1.x - testHt/math.tan(math.radians(testAngle))
                         tpt2.x = pt2.x + testHt/math.tan(math.radians(testAngle))
-                        tl1 = [('M', [pt1.x,pt1.y])]
-                        tl1 += [('L', [tpt1.x, tpt1.y])]
-                        ele1 = inkex.Path(tl1)
-                        tl2 = [('M', [pt1.x,pt1.y])]
-                        tl2 += [('L', [tpt2.x, tpt2.y])]
-                        ele2 = inkex.Path(tl2)
-                        thetal1 = ele1.rotate(theta, [pt1.x,pt1.y])
-                        thetal2 = ele2.rotate(theta, [pt2.x,pt2.y])
+                        t11 = Path([Move(pt1.x,pt1.y),Line(tpt1.x, tpt1.y)])
+                        t12 = Path([Move(pt1.x,pt1.y),Line(tpt2.x, tpt2.y)])
+                        thetal1 = t11.rotate(theta, [pt1.x,pt1.y])
+                        thetal2 = t12.rotate(theta, [pt2.x,pt2.y])
                         tpt1.x = thetal1[1].x
                         tpt1.y = thetal1[1].y
                         tpt2.x = thetal2[1].x
                         tpt2.y = thetal2[1].y
-                        pnpt1 = inkex.paths.Move(tpt1.x, tpt1.y)
-                        pnpt2 = inkex.paths.Move(tpt2.x, tpt2.y)
+                        pnpt1 = Move(tpt1.x, tpt1.y)
+                        pnpt2 = Move(tpt2.x, tpt2.y)
                         if ((not tpath.enclosed) and (self.insidePath(tpath.path, pnpt1) or self.insidePath(tpath.path, pnpt2))) or \
                            (tpath.enclosed and ((not self.insidePath(tpath.path, pnpt1)) and (not self.insidePath(tpath.path, pnpt2)))):
                             tpt1.y = pt1.y + currTabHt
@@ -459,14 +435,10 @@ class Polygen(inkex.EffectExtension):
                             tpt2.y = pt2.y - currTabHt
                         tpt1.x = pt1.x - currTabHt/math.tan(math.radians(currTabAngle))
                         tpt2.x = pt2.x + currTabHt/math.tan(math.radians(currTabAngle))
-                        tl1 = [('M', [pt1.x,pt1.y])]
-                        tl1 += [('L', [tpt1.x, tpt1.y])]
-                        ele1 = inkex.Path(tl1)
-                        tl2 = [('M', [pt1.x,pt1.y])]
-                        tl2 += [('L', [tpt2.x, tpt2.y])]
-                        ele2 = inkex.Path(tl2)
-                        thetal1 = ele1.rotate(theta, [pt1.x,pt1.y])
-                        thetal2 = ele2.rotate(theta, [pt2.x,pt2.y])
+                        t11 = Path([Move(pt1.x,pt1.y),Line(tpt1.x, tpt1.y)])
+                        t12 = Path([Move(pt1.x,pt1.y),Line(tpt2.x, tpt2.y)])
+                        thetal1 = t11.rotate(theta, [pt1.x,pt1.y])
+                        thetal2 = t12.rotate(theta, [pt2.x,pt2.y])
                         tpt1.x = thetal1[1].x
                         tpt1.y = thetal1[1].y
                         tpt2.x = thetal2[1].x
@@ -494,7 +466,6 @@ class Polygen(inkex.EffectExtension):
             
         return tpt1,tpt2
 
-
     def effect(self):
         scale = self.svg.unittouu('1'+self.options.unit)
         layer = self.svg.get_current_layer()
@@ -508,8 +479,8 @@ class Polygen(inkex.EffectExtension):
         radpath = 0 # Initial assumption is that first path is the radius
         outlpath = 1 # and second path is the outline
         yorient = True # assuming we are revolving around the Y axis
-        for selem in self.svg.selection.filter(inkex.PathElement):
-            elems.append(selem)
+        for selem in self.svg.selection.filter(PathElement):
+            elems.append(copy.deepcopy(selem))
         if len(elems) == 0:
             raise inkex.AbortExtension("ERROR: Nothing selected")
         elif len(elems) != 2:
@@ -522,12 +493,27 @@ class Polygen(inkex.EffectExtension):
                 for tf in transforms:
                     if tf.startswith('scale'):
                         escale = float(tf.split('(')[1].split(')')[0])
+                if 'style' in elem.attrib:
+                    lsstr = elem.attrib['style'].split(';')
+                    for stoken in range(len(lsstr)):
+                        if lsstr[stoken].startswith('stroke-width'):
+                            swt = lsstr[stoken].split(':')[1]
+                            swf = str(float(swt)*escale)
+                            lsstr[stoken] = lsstr[stoken].replace(swt, swf)
+                        if lsstr[stoken].startswith('stroke-miterlimit'):
+                            swt = lsstr[stoken].split(':')[1]
+                            swf = str(float(swt)*escale)
+                            lsstr[stoken] = lsstr[stoken].replace(swt, swf)
+                    sstr = ";".join(lsstr)
+                else:
+                    sstr = None
+                elem.apply_transform()
             last_letter = 'Z'
             for ptoken in elem.path: # For each point in the path
                 if ptoken.letter == 'M': # Starting point
                     # Hold this point in case we receive a Z
-                    ptx1 = mx = ptoken.x * escale
-                    pty1 = my = ptoken.y * escale
+                    ptx1 = mx = ptoken.x
+                    pty1 = my = ptoken.y
                     '''
                     Assign a structure to the new path. We assume that there is
                     only one path and, therefore, it isn't enclosed by a
@@ -537,39 +523,30 @@ class Polygen(inkex.EffectExtension):
                     npath = pathStruct()
                     npath.enclosed = False
                     npath.id = elem.get_id()
-                    if 'style' in elem.attrib:
-                        npath.style = elem.attrib['style']
-                        if not math.isclose(escale, 1.0):
-                            lsstr = npath.style.split(';')
-                            for stoken in range(len(lsstr)):
-                                if lsstr[stoken].startswith('stroke-width'):
-                                    swt = lsstr[stoken].split(':')[1]
-                                    swf = str(float(swt)*escale)
-                                    lsstr[stoken] = lsstr[stoken].replace(swt, swf)
-                                if lsstr[stoken].startswith('stroke-miterlimit'):
-                                    swt = lsstr[stoken].split(':')[1]
-                                    swf = str(float(swt)*escale)
-                                    lsstr[stoken] = lsstr[stoken].replace(swt, swf)
-                            npath.style = ";".join(lsstr)
-                    npath.path.append(inkex.paths.Move(ptx1,pty1))
+                    if sstr == None:
+                        if 'style' in elem.attrib:
+                            npath.style = elem.attrib['style']
+                    else:
+                        npath.style = sstr
+                    npath.path.append(Move(ptx1,pty1))
                 else:
                     if last_letter != 'M':
                         ptx1 = ptx2
                         pty1 = pty2
                     if ptoken.letter == 'L':
-                        ptx2 = ptoken.x * escale
-                        pty2 = ptoken.y * escale
+                        ptx2 = ptoken.x
+                        pty2 = ptoken.y
                     elif ptoken.letter == 'H':
-                        ptx2 = ptoken.x * escale
+                        ptx2 = ptoken.x
                         pty2 = pty1
                     elif ptoken.letter == 'V':
                         ptx2 = ptx1
-                        pty2 = ptoken.y * escale
+                        pty2 = ptoken.y
                     elif ptoken.letter == 'Z':
                         raise inkex.AbortExtension("ERROR: Paths must be open")
                     else:
                         raise inkex.AbortExtension("ERROR: Unrecognized path command {0}".format(ptoken.letter))
-                    npath.path.append(inkex.paths.Line(ptx2,pty2))
+                    npath.path.append(Line(ptx2,pty2))
                 last_letter = ptoken.letter
             npaths.append(npath)
                 
@@ -587,16 +564,16 @@ class Polygen(inkex.EffectExtension):
         the size of the polygons that will cover them. We were given the number
         of sides.
         '''
-        dscore = '' # Used for building dashlines for model
-        dwscore = '' # Used for building dashlines for wrapper
+        dscore = Path() # Used for building dashlines for model
+        dwscore = Path() # Used for building dashlines for wrapper
         if yorient:
             # Make sure the outline's points are ordered in ascending Y
             if npaths[outlpath].path[0].y < npaths[outlpath].path[0].y:
                 npaths[outlpath].path.reverse()
             # construct the side panel
             xpos = ypos = 0.0
-            lhs = [] # Left hand side of panel
-            rhs = [] # Right hand side of panel
+            lhs = Path() # Left hand side of panel
+            rhs = Path() # Right hand side of panel
             for npoint in range(len(npaths[outlpath].path)):
                 pr = abs(npaths[radpath].path[0].x - npaths[outlpath].path[npoint].x)
                 pwidth = 2.0*pr*math.tan(math.pi/polysides)
@@ -604,80 +581,81 @@ class Polygen(inkex.EffectExtension):
                 if npoint == 0:
                     topR = pR
                     topw = pwidth
-                    lhs.append(inkex.paths.Move(xpos - pwidth/2,ypos))
-                    rhs.append(inkex.paths.Line(xpos + pwidth/2,ypos))
+                    lhs.append(Move(xpos - pwidth/2,ypos))
+                    rhs.append(Move(xpos + pwidth/2,ypos))
                 else:
                     seglength = math.sqrt((npaths[outlpath].path[npoint-1].x - npaths[outlpath].path[npoint].x)**2 + \
                                           (npaths[outlpath].path[npoint-1].y - npaths[outlpath].path[npoint].y)**2)
                     ypos += seglength
-                    lhs.append(inkex.paths.Line(xpos - pwidth/2,ypos))
-                    rhs.append(inkex.paths.Line(xpos + pwidth/2,ypos))
+                    lhs.append(Line(xpos - pwidth/2,ypos))
+                    rhs.append(Line(xpos + pwidth/2,ypos))
                     if npoint == len(npaths[outlpath].path)-1:
                         bottomR = pR
                         bottomw = pwidth
             # Put score marks across the panel
             for pcnt in range(len(lhs)):
                 if (pcnt != 0) and (pcnt != (len(lhs)-1)):
-                    dscore += self.makescore(lhs[pcnt], rhs[pcnt], dashlength)
-            dwscore = dscore # wrapper only needs these scorelines
-            
-            rhs.reverse() # Reverse the order so we can
+                    dscore.append(self.makescore(lhs[pcnt], rhs[pcnt], dashlength))
+            dwscore = dscore.copy() # wrapper only needs these scorelines
+            rhs=rhs.reverse() # Reverse the order so we can create a closed path
             cpath = pathStruct()
             cpath.enclosed = False
             cpath.id = 'panel'
             cpath.path = lhs + rhs
             # add tabs to panel
-            dprop = '' # Used for building the main path
-            dwrap = ''
+            dprop = Path() # Used for building the main path
+            dwrap = Path() # Used for building the wrapper
             for ptn in range(len(cpath.path)):
                 if ptn == 0:
-                    dprop = 'M '+str(cpath.path[ptn].x)+','+str(cpath.path[ptn].y)
-                    dwrap = 'M '+str(cpath.path[ptn].x)+','+str(cpath.path[ptn].y)
+                    dprop.append(Move(cpath.path[ptn].x,cpath.path[ptn].y))
+                    dwrap.append(Move(cpath.path[ptn].x,cpath.path[ptn].y))
                 else:
                     if ptn > (len(npaths[outlpath].path)-1):
                         dscore += self.makescore(cpath.path[ptn-1], cpath.path[ptn],dashlength)
                         tabpt1, tabpt2 = self.makeTab(cpath, cpath.path[ptn-1], cpath.path[ptn], tab_height, tab_angle)
-                        dprop += ' L '+str(tabpt1.x)+','+str(tabpt1.y)
-                        dprop += ' L '+str(tabpt2.x)+','+str(tabpt2.y)
-                    dprop += ' L '+str(cpath.path[ptn].x)+','+str(cpath.path[ptn].y)
-                    dwrap += ' L '+str(cpath.path[ptn].x)+','+str(cpath.path[ptn].y)
+                        dprop.append(tabpt1)
+                        dprop.append(tabpt2)
+                    dprop.append(Line(cpath.path[ptn].x,cpath.path[ptn].y))
+                    dwrap.append(Line(cpath.path[ptn].x,cpath.path[ptn].y))
                     if ptn == len(cpath.path)-1:
                         tabpt1, tabpt2 = self.makeTab(cpath, cpath.path[ptn], cpath.path[0], tab_height, tab_angle)
-                        dprop += ' L '+str(tabpt1.x)+','+str(tabpt1.y)
-                        dprop += ' L '+str(tabpt2.x)+','+str(tabpt2.y)
-                        dprop += 'Z'
-                        dscore += self.makescore(cpath.path[ptn], cpath.path[0],dashlength)
-                        dwrap += 'Z '
+                        dprop.append(tabpt1)
+                        dprop.append(tabpt2)
+                        dprop.append(ZoneClose())
+                        dscore.append(self.makescore(cpath.path[ptn], cpath.path[0],dashlength))
+                        dwrap.append(ZoneClose())
             if npaths[outlpath].style != None:
                 lsstr = npaths[outlpath].style.split(';')
+                replacedit = False
                 for stoken in range(len(lsstr)):
                     if lsstr[stoken].startswith('fill'):
                         swt = lsstr[stoken].split(':')[1]
                         swf = '#eeeeee'
                         lsstr[stoken] = lsstr[stoken].replace(swt, swf)
-                    else:
-                        lsstr.append("\'fill\':\'#eeeeee\'")
+                        replacedit = True
+                if not replacedit:
+                    lsstr.append("\'fill\':\'#eeeeee\'")
                 sstr = ";".join(lsstr)
             if math.isclose(dashlength, 0.0):
                 # lump together all the score lines
-                groupm = inkex.elements._groups.Group()
+                groupm = Group()
                 groupm.label = 'group0ms'
-                self.drawline(dprop,'model',groupm,sstr) # Output the model
-                self.drawline(dscore[1:],'mscore',groupm,sstr) # Output the scorelines separately
+                self.drawline(str(dprop),'model',groupm,sstr) # Output the model
+                self.drawline(str(dscore),'mscore',groupm,sstr) # Output the scorelines separately
                 layer.append(groupm)
-                groupw = inkex.elements._groups.Group()
+                groupw = Group()
                 groupw.label = 'group0ws'
-                self.drawline(dwrap,'wrapper',groupw,sstr) # Output the model
-                self.drawline(dwscore[1:],'wscore',groupw,sstr) # Output the scorelines separately
+                self.drawline(str(dwrap),'wrapper',groupw,sstr) # Output the model
+                self.drawline(str(dwscore),'wscore',groupw,sstr) # Output the scorelines separately
                 layer.append(groupw)
             else:
                 dprop += dscore
-                self.drawline(dprop,npaths[outlpath].id+"ms",layer,sstr)
+                self.drawline(str(dprop),npaths[outlpath].id+"ms",layer,sstr)
                 dwrap += dwscore
-                self.drawline(dwrap,npaths[outlpath].id+"ws",layer,sstr)
+                self.drawline(str(dwrap),npaths[outlpath].id+"ws",layer,sstr)
             # Finally, generate the top and bottom polygons
-            self.drawline(self.makepoly(topw, polysides),npaths[outlpath].id+"lid1",layer,sstr)
-            self.drawline(self.makepoly(bottomw, polysides),npaths[outlpath].id+"lid2",layer,sstr)
+            self.drawline(str(self.makepoly(topw, polysides)),npaths[outlpath].id+"lid1",layer,sstr)
+            self.drawline(str(self.makepoly(bottomw, polysides)),npaths[outlpath].id+"lid2",layer,sstr)
                         
         
 if __name__ == '__main__':
