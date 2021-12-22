@@ -18,7 +18,7 @@
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 #
 """
-Given the number of polygon sides, an outline to be generated perpendicular to
+Given the number of polygon sides, a profile to be generated perpendicular to
 each side, and a straight line whose distance is the radius of the revolved
 outline, this program generates (1) a paper model of one of the n sides with tabs
 to assemble into a full 3D model; (2) the top and bottom lids for the generated
@@ -80,8 +80,12 @@ class Polygen(inkex.EffectExtension):
             help="Angle of tab edges in degrees")
         pars.add_argument("--tabheight", type=float, default=0.4,\
             help="Height of tab in dimensional units")
+        pars.add_argument("--cntroffset", type=float, default=0.4,\
+            help="Offset from center in dimensional units")
         pars.add_argument("--dashlength", type=float, default=0.1,\
             help="Length of dashline in dimentional units (zero for solid line)")
+        pars.add_argument("--linesonwrapper", type=inkex.Boolean, dest="linesonwrapper",\
+            help="Put dashlines on wrappers")
         pars.add_argument("--unit", default="in",\
             help="Dimensional units of selected paths")
 
@@ -348,104 +352,7 @@ class Polygen(inkex.EffectExtension):
             
         return tpt1,tpt2
 
-    def effect(self):
-        scale = self.svg.unittouu('1'+self.options.unit)
-        layer = self.svg.get_current_layer()
-        polysides = int(self.options.polysides)
-        tab_angle = float(self.options.tabangle)
-        tab_height = float(self.options.tabheight) * scale
-        dashlength = float(self.options.dashlength) * scale
-        npaths = []
-        elems = []
-        sstr = None
-        radpath = 0 # Initial assumption is that first path is the radius
-        outlpath = 1 # and second path is the outline
-        yorient = True # assuming we are revolving around the Y axis
-        for selem in self.svg.selection.filter(PathElement):
-            elems.append(copy.deepcopy(selem))
-        if len(elems) == 0:
-            raise inkex.AbortExtension("ERROR: Nothing selected")
-        elif len(elems) != 2:
-            raise inkex.AbortExtension("ERROR: Select only the outline and its radius line\n"\
-                                       +"Nothing more or less.")
-        for elem in elems: # for each path
-            escale = 1.0
-            if 'transform' in elem.attrib:
-                transforms = elem.attrib['transform'].split()
-                for tf in transforms:
-                    if tf.startswith('scale'):
-                        escale = float(tf.split('(')[1].split(')')[0])
-                if 'style' in elem.attrib:
-                    lsstr = elem.attrib['style'].split(';')
-                    for stoken in range(len(lsstr)):
-                        if lsstr[stoken].startswith('stroke-width'):
-                            swt = lsstr[stoken].split(':')[1]
-                            swf = str(float(swt)*escale)
-                            lsstr[stoken] = lsstr[stoken].replace(swt, swf)
-                        if lsstr[stoken].startswith('stroke-miterlimit'):
-                            swt = lsstr[stoken].split(':')[1]
-                            swf = str(float(swt)*escale)
-                            lsstr[stoken] = lsstr[stoken].replace(swt, swf)
-                    sstr = ";".join(lsstr)
-                else:
-                    sstr = None
-                elem.apply_transform()
-            last_letter = 'Z'
-            for ptoken in elem.path: # For each point in the path
-                if ptoken.letter == 'M': # Starting point
-                    # Hold this point in case we receive a Z
-                    ptx1 = mx = ptoken.x
-                    pty1 = my = ptoken.y
-                    '''
-                    Assign a structure to the new path. We assume that there is
-                    only one path and, therefore, it isn't enclosed by a
-                    sub-path. However, we'll suffix the ID, if we find a
-                    sub-path.
-                    '''
-                    npath = pathStruct()
-                    npath.enclosed = False
-                    npath.id = elem.get_id()
-                    if sstr == None:
-                        if 'style' in elem.attrib:
-                            npath.style = elem.attrib['style']
-                    else:
-                        npath.style = sstr
-                    npath.path.append(Move(ptx1,pty1))
-                else:
-                    if last_letter != 'M':
-                        ptx1 = ptx2
-                        pty1 = pty2
-                    if ptoken.letter == 'L':
-                        ptx2 = ptoken.x
-                        pty2 = ptoken.y
-                    elif ptoken.letter == 'H':
-                        ptx2 = ptoken.x
-                        pty2 = pty1
-                    elif ptoken.letter == 'V':
-                        ptx2 = ptx1
-                        pty2 = ptoken.y
-                    elif ptoken.letter == 'Z':
-                        raise inkex.AbortExtension("ERROR: Paths must be open")
-                    else:
-                        raise inkex.AbortExtension("ERROR: Unrecognized path command {0}".format(ptoken.letter))
-                    npath.path.append(Line(ptx2,pty2))
-                last_letter = ptoken.letter
-            npaths.append(npath)
-                
-        # Let's validate the input
-        if len(npaths[1].path) == 2:
-            # Our initial assumption was wrong
-            radpath = 1
-            outlpath = 0
-        if math.isclose(npaths[radpath].path[0].y,npaths[radpath].path[1].y):
-            # Guessed wrong. For now, we're just going to abort
-            # TODO: Support revolving around the X axis
-            raise inkex.AbortExtension("ERROR: This extension can only revolve about the Y axis")
-        '''
-        The model will be open at the top and the bottom, so we have to calculate
-        the size of the polygons that will cover them. We were given the number
-        of sides.
-        '''
+    def BuildPolyside(self, npaths, outlpath, radpath, yorient, layer, polysides, lines_on_wrapper, dashlength, tab_height, tab_angle, groupid="0"):
         dscore = Path() # Used for building dashlines for model
         dwscore = Path() # Used for building dashlines for wrapper
         if yorient:
@@ -521,23 +428,154 @@ class Polygen(inkex.EffectExtension):
             if math.isclose(dashlength, 0.0):
                 # lump together all the score lines
                 groupm = Group()
-                groupm.label = 'group0ms'
+                groupm.label = "group"+groupid+"ms"
                 self.drawline(str(dprop),'model',groupm,sstr) # Output the model
                 self.drawline(str(dscore),'mscore',groupm,sstr) # Output the scorelines separately
                 layer.append(groupm)
-                groupw = Group()
-                groupw.label = 'group0ws'
-                self.drawline(str(dwrap),'wrapper',groupw,sstr) # Output the model
-                self.drawline(str(dwscore),'wscore',groupw,sstr) # Output the scorelines separately
-                layer.append(groupw)
+                if lines_on_wrapper:
+                    groupw = Group()
+                    groupw.label = "group"+groupid+"ws"
+                    self.drawline(str(dwrap),'wrapper',groupw,sstr) # Output the model
+                    self.drawline(str(dwscore),'wscore',groupw,sstr) # Output the scorelines separately
+                    layer.append(groupw)
+                else: # Just the wrapper
+                    self.drawline(str(dwrap),npaths[outlpath].id+"ws",layer,sstr) # Output the model
             else:
                 dprop += dscore
                 self.drawline(str(dprop),npaths[outlpath].id+"ms",layer,sstr)
-                dwrap += dwscore
+                if lines_on_wrapper:
+                    dwrap += dwscore
                 self.drawline(str(dwrap),npaths[outlpath].id+"ws",layer,sstr)
-            # Finally, generate the top and bottom polygons
-            self.drawline(str(self.makepoly(topw, polysides)),npaths[outlpath].id+"lid1",layer,sstr)
-            self.drawline(str(self.makepoly(bottomw, polysides)),npaths[outlpath].id+"lid2",layer,sstr)
+        return topw,bottomw,sstr
+
+    def effect(self):
+        scale = self.svg.unittouu('1'+self.options.unit)
+        layer = self.svg.get_current_layer()
+        polysides = int(self.options.polysides)
+        tab_angle = float(self.options.tabangle)
+        tab_height = float(self.options.tabheight) * scale
+        cntroffset = float(self.options.cntroffset) * scale
+        dashlength = float(self.options.dashlength) * scale
+        lines_on_wrapper = self.options.linesonwrapper
+        if not math.isclose(cntroffset, 0.0, abs_tol = 1e-09):
+            # Make sure polysides is 4
+            if polysides != 4:
+                inkex.errormsg("INFO: A non-zero Offset from the centerline requires exactly four sides. Ignoring Number of Polygon sides specified.")
+                polysides = 4
+        npaths = []
+        elems = []
+        sstr = None
+        radpath = 0 # Initial assumption is that first path is the radius
+        outlpath = 1 # and second path is the outline
+        yorient = True # assuming we are revolving around the Y axis
+        for selem in self.svg.selection.filter(PathElement):
+            elems.append(copy.deepcopy(selem))
+        if len(elems) == 0:
+            raise inkex.AbortExtension("ERROR: Nothing selected")
+        elif len(elems) != 2:
+            raise inkex.AbortExtension("ERROR: Select only the outline and its radius line\n"\
+                                       +"Nothing more or less.")
+        for elem in elems: # for each path
+            escale = 1.0
+            if 'transform' in elem.attrib:
+                transforms = elem.attrib['transform'].split()
+                for tf in transforms:
+                    if tf.startswith('scale'):
+                        escale = float(tf.split('(')[1].split(')')[0])
+                if 'style' in elem.attrib:
+                    lsstr = elem.attrib['style'].split(';')
+                    for stoken in range(len(lsstr)):
+                        if lsstr[stoken].startswith('stroke-width'):
+                            swt = lsstr[stoken].split(':')[1]
+                            swf = str(float(swt)*escale)
+                            lsstr[stoken] = lsstr[stoken].replace(swt, swf)
+                        if lsstr[stoken].startswith('stroke-miterlimit'):
+                            swt = lsstr[stoken].split(':')[1]
+                            swf = str(float(swt)*escale)
+                            lsstr[stoken] = lsstr[stoken].replace(swt, swf)
+                    sstr = ";".join(lsstr)
+                else:
+                    sstr = None
+                elem.apply_transform()
+            last_letter = 'Z'
+            for ptoken in elem.path.to_absolute(): # For each point in the path
+                if ptoken.letter == 'M': # Starting point
+                    # Hold this point in case we receive a Z
+                    ptx1 = mx = ptoken.x
+                    pty1 = my = ptoken.y
+                    '''
+                    Assign a structure to the new path. We assume that there is
+                    only one path and, therefore, it isn't enclosed by a
+                    sub-path. However, we'll suffix the ID, if we find a
+                    sub-path.
+                    '''
+                    npath = pathStruct()
+                    npath.enclosed = False
+                    npath.id = elem.get_id()
+                    if sstr == None:
+                        if 'style' in elem.attrib:
+                            npath.style = elem.attrib['style']
+                    else:
+                        npath.style = sstr
+                    npath.path.append(Move(ptx1,pty1))
+                else:
+                    if last_letter != 'M':
+                        ptx1 = ptx2
+                        pty1 = pty2
+                    if ptoken.letter == 'L':
+                        ptx2 = ptoken.x
+                        pty2 = ptoken.y
+                    elif ptoken.letter == 'H':
+                        ptx2 = ptoken.x
+                        pty2 = pty1
+                    elif ptoken.letter == 'V':
+                        ptx2 = ptx1
+                        pty2 = ptoken.y
+                    elif ptoken.letter == 'Z':
+                        raise inkex.AbortExtension("ERROR: Paths must be open")
+                    else:
+                        raise inkex.AbortExtension("ERROR: Unrecognized path command {0}".format(ptoken.letter))
+                    npath.path.append(Line(ptx2,pty2))
+                last_letter = ptoken.letter
+            npaths.append(npath)
+                
+        # Let's validate the input
+        if len(npaths[1].path) == 2:
+            # Our initial assumption was wrong
+            radpath = 1
+            outlpath = 0
+        if math.isclose(npaths[radpath].path[0].y,npaths[radpath].path[1].y):
+            # Guessed wrong. For now, we're just going to abort
+            # TODO: Support revolving around the X axis
+            raise inkex.AbortExtension("ERROR: This extension can only revolve about the Y axis")
+        '''
+        The model will be open at the top and the bottom, so we have to calculate
+        the size of the polygons that will cover them. We were given the number
+        of sides.
+        '''
+        topw0, bottomw0, sstr0 = self.BuildPolyside(npaths, outlpath, radpath, yorient, layer, polysides, lines_on_wrapper, dashlength, tab_height, tab_angle, "0")
+        if math.isclose(cntroffset, 0.0):
+            # Generate the top and bottom polygons
+            self.drawline(str(self.makepoly(topw0, polysides)),npaths[outlpath].id+"lid0",layer,sstr0)
+            self.drawline(str(self.makepoly(bottomw0, polysides)),npaths[outlpath].id+"lid1",layer,sstr0)
+        else: # Special case: we're doing a rectangular shape
+            npaths[radpath].path[0].x += cntroffset
+            npaths[radpath].path[1].x += cntroffset
+            topw1, bottomw1, sstr1 = self.BuildPolyside(npaths, outlpath, radpath, yorient, layer, polysides, lines_on_wrapper, dashlength, tab_height, tab_angle, "1")
+            dprop = Path()
+            dprop.append(Move(0.0,0.0))
+            dprop.append(Line(topw0,0.0))
+            dprop.append(Line(topw0,topw1))
+            dprop.append(Line(0.0,topw1))
+            dprop.append(ZoneClose())
+            self.drawline(str(dprop),npaths[outlpath].id+"lid0",layer,sstr0)
+            dprop = Path()
+            dprop.append(Move(0.0,0.0))
+            dprop.append(Line(bottomw0,0.0))
+            dprop.append(Line(bottomw0,bottomw1))
+            dprop.append(Line(0.0,bottomw1))
+            dprop.append(ZoneClose())
+            self.drawline(str(dprop),npaths[outlpath].id+"lid1",layer,sstr1)
                         
         
 if __name__ == '__main__':

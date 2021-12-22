@@ -5,13 +5,15 @@
     <param name="usermenu" type="notebook">
       <page name="settings" gui-text="Settings">
         <param name ="polysides" type="int" min="3" max="360" gui-text="Number of Polygon Sides:">6</param>
+        <param name="cntroffset" type="float" precision="3" min="-9999.0" max="9999.0" gui-text="Offset from Centerline:">0.0</param>
         <param name ="tabangle" type="float" min="0.0" max="90.0" gui-text="Angle of tab edges (degrees):">45.0</param>
         <param name="tabheight" type="float" precision="3" min="0.01" max="9999.0" gui-text="Height of tab:">0.4</param>
         <param name="dashlength" type="float" precision="3" min="0.0" max="9999.0" gui-text="Length of dashline(zero for solid line):">0.1</param>
+        <param name="linesonwrapper" type="bool" gui-text="Put dashlines on wrappers:">true</param>
         <param name="unit" type="optiongroup" appearance="combo" gui-text="Dimensional units of above parameters and the selected paths:">
+            <option translatable="no" value="in">in</option>
             <option translatable="no" value="px">px</option>
             <option translatable="no" value="pt">pt</option>
-            <option translatable="no" value="in">in</option>
             <option translatable="no" value="ft">ft</option>
             <option translatable="no" value="yd">yd</option>
             <option translatable="no" value="mm">mm</option>
@@ -21,7 +23,10 @@
         </param>
       </page>
       <page name="_help" gui-text="Help">
-        <label xml:space="preserve">Given a closed path of straight lines, this program generates a paper model of tabs and score lines for each straight edge.</label>
+        <label xml:space="preserve">
+        Given a profile path and a centerline, creates one side of polygon figure with a wrapper, base, and lid.
+        
+        Setting Offset from Centerline to a non-zero value will create the two adjacent sides of a rectangular shape. If the Number of Polygon sides is not four, the extension will ignore it.</label>
       </page>
     </param>
   <effect needs-live-preview="false">
