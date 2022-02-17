@@ -441,10 +441,10 @@ class Polygen(inkex.EffectExtension):
                 else: # Just the wrapper
                     self.drawline(str(dwrap),npaths[outlpath].id+"ws",layer,sstr) # Output the model
             else:
-                dprop += dscore
+                dprop = dscore + dprop
                 self.drawline(str(dprop),npaths[outlpath].id+"ms",layer,sstr)
                 if lines_on_wrapper:
-                    dwrap += dwscore
+                    dwrap = dwscore + dwrap
                 self.drawline(str(dwrap),npaths[outlpath].id+"ws",layer,sstr)
         return topw,bottomw,sstr
 
