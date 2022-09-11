@@ -3,6 +3,8 @@
 
 Given an open path (silhouette) and a centerline, this program generates (1) one side of an 'n' sided polygonal paper model; top and bottom lids for the assembled model; and (3) a wrapper for the one-sided model.
 
+Update: Now allows you to specify the color of solid score lines
+
 Installing:
  
 Copy polygen.inx and polygen.py into your Inkscape user extensions directory. Where is that? Open Inkscape and go to the System section of the Preferences menu (Edit --> Preferences --> System). You will find a User extensions item containing the path to your user extensions directory.

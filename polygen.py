@@ -84,6 +84,8 @@ class Polygen(inkex.EffectExtension):
             help="Offset from center in dimensional units")
         pars.add_argument("--dashlength", type=float, default=0.1,\
             help="Length of dashline in dimentional units (zero for solid line)")
+        pars.add_argument("--dashcolor", type=str, dest="dashcolor", default="#00CC00",\
+            help="Color of scorelines when solid")    
         pars.add_argument("--linesonwrapper", type=inkex.Boolean, dest="linesonwrapper",\
             help="Put dashlines on wrappers")
         pars.add_argument("--unit", default="in",\
@@ -352,7 +354,7 @@ class Polygen(inkex.EffectExtension):
             
         return tpt1,tpt2
 
-    def BuildPolyside(self, npaths, outlpath, radpath, yorient, layer, polysides, lines_on_wrapper, dashlength, tab_height, tab_angle, groupid="0"):
+    def BuildPolyside(self, npaths, outlpath, radpath, yorient, layer, polysides, lines_on_wrapper, dashlength, dashcolor, tab_height, tab_angle, groupid="0"):
         dscore = Path() # Used for building dashlines for model
         dwscore = Path() # Used for building dashlines for wrapper
         if yorient:
@@ -430,13 +432,14 @@ class Polygen(inkex.EffectExtension):
                 groupm = Group()
                 groupm.label = "group"+groupid+"ms"
                 self.drawline(str(dprop),'model',groupm,sstr) # Output the model
-                self.drawline(str(dscore),'mscore',groupm,sstr) # Output the scorelines separately
+                sstrscore = {'stroke':dashcolor,'stroke-width':'0.25','fill':'#eeeeee'}
+                self.drawline(str(dscore),'mscore',groupm,sstrscore) # Output the scorelines separately
                 layer.append(groupm)
                 if lines_on_wrapper:
                     groupw = Group()
                     groupw.label = "group"+groupid+"ws"
                     self.drawline(str(dwrap),'wrapper',groupw,sstr) # Output the model
-                    self.drawline(str(dwscore),'wscore',groupw,sstr) # Output the scorelines separately
+                    self.drawline(str(dwscore),'wscore',groupw,sstrscore) # Output the scorelines separately
                     layer.append(groupw)
                 else: # Just the wrapper
                     self.drawline(str(dwrap),npaths[outlpath].id+"ws",layer,sstr) # Output the model
@@ -456,6 +459,7 @@ class Polygen(inkex.EffectExtension):
         tab_height = float(self.options.tabheight) * scale
         cntroffset = float(self.options.cntroffset) * scale
         dashlength = float(self.options.dashlength) * scale
+        dashcolor = self.options.dashcolor
         lines_on_wrapper = self.options.linesonwrapper
         if not math.isclose(cntroffset, 0.0, abs_tol = 1e-09):
             # Make sure polysides is 4
@@ -555,7 +559,7 @@ class Polygen(inkex.EffectExtension):
         the size of the polygons that will cover them. We were given the number
         of sides.
         '''
-        topw0, bottomw0, sstr0 = self.BuildPolyside(npaths, outlpath, radpath, yorient, layer, polysides, lines_on_wrapper, dashlength, tab_height, tab_angle, "0")
+        topw0, bottomw0, sstr0 = self.BuildPolyside(npaths, outlpath, radpath, yorient, layer, polysides, lines_on_wrapper, dashlength, dashcolor, tab_height, tab_angle, "0")
         if math.isclose(cntroffset, 0.0):
             # Generate the top and bottom polygons
             self.drawline(str(self.makepoly(topw0, polysides)),npaths[outlpath].id+"lid0",layer,sstr0)
@@ -563,7 +567,7 @@ class Polygen(inkex.EffectExtension):
         else: # Special case: we're doing a rectangular shape
             npaths[radpath].path[0].x += cntroffset
             npaths[radpath].path[1].x += cntroffset
-            topw1, bottomw1, sstr1 = self.BuildPolyside(npaths, outlpath, radpath, yorient, layer, polysides, lines_on_wrapper, dashlength, tab_height, tab_angle, "1")
+            topw1, bottomw1, sstr1 = self.BuildPolyside(npaths, outlpath, radpath, yorient, layer, polysides, lines_on_wrapper, dashlength, dashcolor, tab_height, tab_angle, "1")
             dprop = Path()
             dprop.append(Move(0.0,0.0))
             dprop.append(Line(topw0,0.0))
